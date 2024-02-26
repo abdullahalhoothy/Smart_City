@@ -1,0 +1,130 @@
+version: '3' # version of the Docker Compose file format. This version is compatible with Docker Engine 1.13.0 and newer.
+
+services: # This section defines the containers (services) to be created by Docker Compose.
+  # zookeeper to manage kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper # This is the name that the container will see itself as, and it's also the name that can be used for inter-container communication if the containers are on the same network.
+    container_name: zookeeper
+    ports:
+      -"2181:2181" # Maps port 2181 on the host to port 2181 in the container, default port for ZooKeeper client connections.
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181 # Sets the client port to 2181.
+      ZOOKEEPER_TICK_TIME: 2000 # The unit of time for ZooKeeper translated to milliseconds. This governs all ZooKeeper time dependent operations.
+    healthcheck:
+      test: ['CMD', 'bash', '-c', "echo 'ruok' | nc localhost 2181"] # uses nc (netcat) to send a "ruok" command to ZooKeeper, which should reply with "imok" if healthy.
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datamasterylab
+
+  # kafka to manage data brokerage
+  broker: 
+    image: confluentinc/cp-server:7.4.0
+    hostname: broker
+    container_name: broker
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092" #  Kafka's default client port.
+      - "9101:9101" # Port for JMX metrics.
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181' # connection string in the format [host]:[port]
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      # PLAINTEXT:PLAINTEXT is a listener named PLAINTEXT uses the PLAINTEXT security protocol. PLAINTEXT means that the data is sent in unencrypted form.
+      # PLAINTEXT_HOST:PLAINTEXT: Similarly, this part specifies that a listener named PLAINTEXT_HOST also uses the PLAINTEXT security protocol. 
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      # List of listeners that Kafka advertises to clients and other brokers. 
+      # A "listener" in Kafka is a network endpoint that a Kafka broker listens on to accept connections from clients and other brokers. 
+      # "Advertised listeners" are the addresses that a Kafka broker publishes to ZooKeeper for clients and other brokers
+      # Docker-to-Docker Communication:
+      #   Listener: Same as above, listening on PLAINTEXT://0.0.0.0:9092
+      #   Advertised Listener: However, for applications running inside another Docker container, you might need to advertise a different listener,
+      #    such as PLAINTEXT://kafka:9092, assuming kafka is the hostname of the Kafka broker container within a Docker network. 
+            # Kafka clients are applications that produce messages to Kafka topics (Producers) or consume messages from Kafka topics (Consumers). 
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # The replication factor for the offsets topic. A low value (1) is used for simplicity but should be higher in production for fault tolerance.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # The amount of time the group coordinator will wait for more consumers to join a new group before it starts the rebalancing process. Setting to 0 for immediate rebalancing.
+      #  Consumer groups are collections of consumers that work together to consume and process data from a shared set of topics.
+      #  an application like Databricks, when consuming data from Kafka, can have multiple consumers configured to form a consumer group. 
+      # Rebalancing is a process that redistributes the partitions among the consumers in a consumer group. 
+
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      # The replication factor for Confluent's license topic. Similar to offsets, a higher value is recommended for production.
+      # Confluent's License Topic is a specific topic used within the Confluent Platform
+      # Data Collection: A publisher (producer) application monitors social media platforms for new posts.
+      #  the publisher sends it to the social_media_posts Kafka topic.
+      #  The messages published to Kafka topics (such as social_media_posts) are stored in Kafka itself.
+      #  Kafka uses its own unique storage system, which is neither a relational database nor a data lake,
+      #   nor is it a traditional database or warehouse.
+      # Log Structure: Kafka stores data in a sequence of messages in what's called a "log." Each message in the log is identified by its offset,
+      #   a sequential number that uniquely identifies each message within a partition. This log is append-only, 
+      # Topics in Kafka are divided into partitions, which are essentially separate logs.
+      #  Partitioning allows for parallelism in processing and increases the scalability of the system. 
+      #  Each partition can be hosted on different Kafka brokers, distributing the load.
+      #  For durability and high availability, Kafka replicates partitions across multiple brokers. 
+
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      # The replication factor for Confluent's balancer topic. Again, higher values are advised for fault tolerance in a production environment.
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # The minimum number of in-sync replicas (ISRs) that must be available for the transaction state log to be considered operational.
+      # "In-Sync Replicas" (ISRs) refer to a subset of replicas of a Kafka partition that are considered up-to-date and
+      #  consistent with the leader replica. Each partition in a Kafka topic has one leader replica and zero or more follower replicas.
+      #   The leader replica handles all read and write requests for the partition, while the follower replicas replicate the leader's log.
+      # Kafka can be configured to acknowledge a write only after a certain number of replicas in the ISR list have successfully written the message. 
+      # The transaction state log works in tandem with ISRs to ensure exactly-once semantics by managing transaction metadata
+      # The "transaction state log" is used to track and manage the state of transactions within Kafka, 
+      #  A transaction in Kafka allows producers to write messages to multiple partitions (and topics) atomically. 
+      #  This means either all messages in the transaction are visible to consumers or none are. 
+      #  Transactions prevent partial updates which could result from failures during the write process, ensuring data integrity.
+      #  The transaction state log serves as the source of truth for the status of transactions. It records metadata about each transaction, 
+      #  such as the transaction ID, the participating partitions, the state of the transaction
+      #  Technically, the transaction state log is implemented as an internal Kafka topic named __transaction_state.
+      #  This topic is used by the Kafka brokers to keep track of transaction status across the entire Kafka cluster.
+      #  The transaction state log is used by Kafka's transaction coordinator (a role taken by one of the Kafka brokers)
+      #   to manage and coordinate transactions across producers, ensuring that transactions are completed successfully or 
+      #   aborted cleanly in case of failures.
+
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # The replication factor for the transaction state log. Like the other replication factors
+      KAFKA_JMX_PORT: 9101
+      # Specifies the port for Java Management Extensions (JMX) to enable remote monitoring and management.
+      KAFKA_JMX_HOSTNAME: localhost
+      # The hostname used for JMX monitoring. 
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # URL for the Confluent Schema Registry, which Kafka uses for schema management.
+      # When a producer application sends a message to a Kafka topic, it first serializes the message data according to a specific schema.
+      # The producer uses a serializer (e.g., Avro, Protobuf, JSON Schema serializer) that is integrated with Schema Registry. 
+      # The serializer checks if the schema is already registered; if not, it registers the new schema with Schema Registry.
+      # The schema ID (not the entire schema) is then included in the message sent to Kafka. 
+      # A consumer application reads a message from a Kafka topic and needs to deserialize the message data back into its original form.
+      # The consumer uses a deserializer (e.g., Avro, Protobuf, JSON Schema deserializer) that is integrated with Schema Registry. 
+
+
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      # Specifies the class to be used for metric reporting. Confluent's metrics reporter is used here.
+      #  which is a component included in Confluent Platform distributions of Kafka. 
+      # Specifies the Kafka brokers to which the metrics reporter should send data.
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: broker:29092
+      # Confluent's metrics are collected and reported via the Confluent Metrics Reporter,
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      # The number of replicas for the metrics reporter topic. Like other replication settings, this should be higher in production.
+      CONFLUENT_METRICS_ENABLE: 'false'
+      # Enables or disables the Confluent metrics reporter. Set to 'false' to disable.
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+      # Customer ID for Confluent support. 'anonymous' is used here for generic setups.
+
+
+
+
+
+
+
+networks:
+  datamasterylab
