@@ -1,5 +1,30 @@
 version: '3' # version of the Docker Compose file format. This version is compatible with Docker Engine 1.13.0 and newer.
 
+
+x-spark-common: &spark-common
+  image: bitnami/spark:latest
+  volumes:
+    - ./jobs:/opt/bitnami/spark/jobs # Mounts a local directory (`./jobs`) into the container at `/opt/bitnami/spark/jobs`.
+  command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 
+  # The command to start a Spark worker node.
+  # bin/spark-class: This part of the command specifies the path to the Spark executable. 
+  # org.apache.spark.deploy.worker.Worker: This class name starts a Spark worker node. 
+  # It connects to the Spark master and registers itself as a node available to run Spark tasks.
+  # spark-class is a script provided by Spark that helps in launching Spark applications or services. 
+  # spark://spark-master:7077: This URI tells the Spark worker where to find the Spark master.
+  #  It uses the Spark's own protocol (spark://), followed by the hostname of the Spark master (spark-master) and the port (7077).
+
+  depends_on:
+    - spark-master
+  environment:
+    SPARK_MODE: Worker
+    SPARK_WORKER_CORES: 2
+    SPARK_WORKER_MEMORY: 1g # minimum 1g
+    SPARK_MASTER_URL: spark://spark-master:7077
+  networks:
+    - datamasterylab
+
+
 services: # This section defines the containers (services) to be created by Docker Compose.
   # zookeeper to manage kafka
   zookeeper:
@@ -7,7 +32,7 @@ services: # This section defines the containers (services) to be created by Dock
     hostname: zookeeper # This is the name that the container will see itself as, and it's also the name that can be used for inter-container communication if the containers are on the same network.
     container_name: zookeeper
     ports:
-      -"2181:2181" # Maps port 2181 on the host to port 2181 in the container, default port for ZooKeeper client connections.
+      - "2181:2181" # Maps port 2181 on the host to port 2181 in the container, default port for ZooKeeper client connections.
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181 # Sets the client port to 2181.
       ZOOKEEPER_TICK_TIME: 2000 # The unit of time for ZooKeeper translated to milliseconds. This governs all ZooKeeper time dependent operations.
@@ -120,11 +145,31 @@ services: # This section defines the containers (services) to be created by Dock
       CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
       # Customer ID for Confluent support. 'anonymous' is used here for generic setups.
 
+    healthcheck:
+      test: [ 'CMD', 'bash', '-c', "nc -z localhost 9092" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datamasterylab
 
+  spark-master:
+    image: bitnami/spark:latest
+    volumes:
+      - ./jobs:/opt/bitnami/spark/jobs
+    command: bin/spark-class org.apache.spark.deploy.master.Master
+    # org.apache.spark.deploy.master.Master: This fully qualified class name points to the Java class that starts the
+    #  Spark master node. When this class is executed, it initializes a Spark master service within the container.
+    ports:
+      - "9090:8080" # Exposes the Spark master web UI by mapping port 8080 in the container to 9090 on the host.
+      - "7077:7077" # Exposes the Spark master service port.
+    networks:
+      - datamasterylab
 
-
-
-
+  spark-worker-1:
+    <<: *spark-common
+  spark-worker-2:
+    <<: *spark-common
 
 networks:
-  datamasterylab
+  datamasterylab:
