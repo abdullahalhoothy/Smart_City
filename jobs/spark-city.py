@@ -5,8 +5,15 @@ from pyspark.sql.types import StructType, StructField, StringType, TimestampType
 from config import configuration
 
 
+# Define the main function that encapsulates the logic for creating a SparkSession.
 def main():
-    spark = SparkSession.builder.appName("SmartCityStreaming") \
+    # Initialize a SparkSession, which is the entry point to using Spark with DataFrame and Dataset APIs.
+    # Set the application name to "SmartCityStreaming". This name will appear in the Spark UI.
+    # Include external packages necessary for Kafka integration and AWS S3 support. This line adds:
+    # - The Spark SQL Kafka connector package for Kafka integration.
+    # - The Hadoop AWS package for integrating Spark with AWS services like S3.
+    # - The AWS Java SDK package for AWS API support.
+    spark = SparkSession.builder.appName("SmartCityStreaming")\
         .config("spark.jars.packages",
                 "org.apache.spark:spark-sql-kafka-0-10_2.13:3.5.0,"
                 "org.apache.hadoop:hadoop-aws:3.3.1,"
@@ -17,3 +24,120 @@ def main():
         .config('spark.hadoop.fs.s3a.aws.credentials.provider',
                 'org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider') \
         .getOrCreate()
+        # Finally, create the SparkSession if it does not exist or return the existing one.
+
+
+
+    # Adjust the log level to minimize the console output on executors
+    spark.sparkContext.setLogLevel('WARN')
+
+    # vehicle schema
+    vehicleSchema = StructType([
+        StructField("id", StringType(), True),
+        StructField("deviceId", StringType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("location", StringType(), True),
+        StructField("speed", DoubleType(), True),
+        StructField("direction", StringType(), True),
+        StructField("make", StringType(), True),
+        StructField("model", StringType(), True),
+        StructField("year", IntegerType(), True),
+        StructField("fuelType", StringType(), True),
+    ])
+
+    # gpsSchema
+    gpsSchema = StructType([
+        StructField("id", StringType(), True),
+        StructField("deviceId", StringType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("speed", DoubleType(), True),
+        StructField("direction", StringType(), True),
+        StructField("vehicleType", StringType(), True)
+    ])
+
+    # trafficSchema
+    trafficSchema = StructType([
+        StructField("id", StringType(), True),
+        StructField("deviceId", StringType(), True),
+        StructField("cameraId", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("snapshot", StringType(), True)
+    ])
+
+    # weatherSchema
+    weatherSchema = StructType([
+        StructField("id", StringType(), True),
+        StructField("deviceId", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("temperature", DoubleType(), True),
+        StructField("weatherCondition", StringType(), True),
+        StructField("precipitation", DoubleType(), True),
+        StructField("windSpeed", DoubleType(), True),
+        StructField("humidity", IntegerType(), True),
+        StructField("airQualityIndex", DoubleType(), True),
+    ])
+
+    # emergencySchema
+    emergencySchema = StructType([
+        StructField("id", StringType(), True),
+        StructField("deviceId", StringType(), True),
+        StructField("incidentId", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("location", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("description", StringType(), True),
+    ])
+
+    def read_kafka_topic(topic, schema):
+        return (spark.readStream
+                .format('kafka')
+                .option('kafka.bootstrap.servers', 'broker:29092')
+                .option('subscribe', topic)
+                .option('startingOffsets', 'earliest')
+                .load()
+                .selectExpr('CAST(value AS STRING)')
+                .select(from_json(col('value'), schema).alias('data'))
+                .select('data.*')
+                .withWatermark('timestamp', '2 minutes')
+                )
+
+    def streamWriter(input: DataFrame, checkpointFolder, output):
+        return (input.writeStream
+                .format('parquet')
+                .option('checkpointLocation', checkpointFolder)
+                .option('path', output)
+                .outputMode('append')
+                .start())
+
+    vehicleDF = read_kafka_topic('vehicle_data', vehicleSchema).alias('vehicle')
+    gpsDF = read_kafka_topic('gps_data', gpsSchema).alias('gps')
+    trafficDF = read_kafka_topic('traffic_data', trafficSchema).alias('traffic')
+    weatherDF = read_kafka_topic('weather_data', weatherSchema).alias('weather')
+    emergencyDF = read_kafka_topic('emergency_data', emergencySchema).alias('emergency')
+
+    # #join all the dfs with id and timestamp
+    # join
+
+    query1 = streamWriter(vehicleDF, 's3a://spark-streaming-data1/checkpoints/vehicle_data',
+                 's3a://spark-streaming-data1/data/vehicle_data')
+    query2 = streamWriter(gpsDF, 's3a://spark-streaming-data1/checkpoints/gps_data',
+                 's3a://spark-streaming-data1/data/gps_data')
+    query3 = streamWriter(trafficDF, 's3a://spark-streaming-data1/checkpoints/traffic_data',
+                 's3a://spark-streaming-data1/data/traffic_data')
+    query4 = streamWriter(weatherDF, 's3a://spark-streaming-data1/checkpoints/weather_data',
+                 's3a://spark-streaming-data1/data/weather_data')
+    query5 = streamWriter(emergencyDF, 's3a://spark-streaming-data1/checkpoints/emergency_data',
+                 's3a://spark-streaming-data1/data/emergency_data')
+
+    query5.awaitTermination()
+
+if __name__ == "__main__":
+    main()
+
+
+# need to pass this command to docker exec
+# docker exec -it smart_city-spark-master-1 spark-submit --master spark://spark-master:7077 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.1,com.amazonaws:aws-java-sdk:1.11.469 jobs/spark-city.py    
+

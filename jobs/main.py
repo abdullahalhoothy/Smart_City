@@ -6,7 +6,7 @@ from confluent_kafka import SerializingProducer
 import json
 
 
-from jobs.generate_data import BIRMINGHAM_COORDINATES, LONDON_COORDINATES, generate_gps_data, \
+from generate_data import BIRMINGHAM_COORDINATES, LONDON_COORDINATES, generate_gps_data, \
     generate_traffic_camera_data, generate_weather_data, generate_emergency_incident_data, \
     generate_vehicle_data
 
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     producer = SerializingProducer(producer_config)
 
     try:
-        simulate_journey(producer, 'Vehicle-CodeWithYu-123')
+        simulate_journey(producer, 'Vehicle-Code-123')
 
     except KeyboardInterrupt:
         print('Simulation ended by the user')

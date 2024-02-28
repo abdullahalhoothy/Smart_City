@@ -22,7 +22,7 @@ x-spark-common: &spark-common
     SPARK_WORKER_MEMORY: 1g # minimum 1g
     SPARK_MASTER_URL: spark://spark-master:7077
   networks:
-    - datamasterylab
+    - mockdatanetwork
 
 
 services: # This section defines the containers (services) to be created by Docker Compose.
@@ -42,7 +42,7 @@ services: # This section defines the containers (services) to be created by Dock
       timeout: 5s
       retries: 5
     networks:
-      - datamasterylab
+      - mockdatanetwork
 
   # kafka to manage data brokerage
   broker: 
@@ -151,7 +151,7 @@ services: # This section defines the containers (services) to be created by Dock
       timeout: 5s
       retries: 5
     networks:
-      - datamasterylab
+      - mockdatanetwork
 
   spark-master:
     image: bitnami/spark:latest
@@ -164,7 +164,7 @@ services: # This section defines the containers (services) to be created by Dock
       - "9090:8080" # Exposes the Spark master web UI by mapping port 8080 in the container to 9090 on the host.
       - "7077:7077" # Exposes the Spark master service port.
     networks:
-      - datamasterylab
+      - mockdatanetwork
 
   spark-worker-1:
     <<: *spark-common
@@ -172,4 +172,4 @@ services: # This section defines the containers (services) to be created by Dock
     <<: *spark-common
 
 networks:
-  datamasterylab:
+  mockdatanetwork:
