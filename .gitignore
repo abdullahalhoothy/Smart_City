@@ -1,3 +1,8 @@
 config.py
 secrets.auto.tfvars
-.terraform/
+# Ignore files or directories containing ".terraform"
+**/*terraform*
+
+# Ignore files or directories containing ".tfstate"
+**/*.tfstate*
+terraform.tfstate
